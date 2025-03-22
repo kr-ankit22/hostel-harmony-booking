@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
@@ -18,12 +19,37 @@ import { Calendar } from '@/components/ui/calendar';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { format } from 'date-fns';
 import { CalendarIcon, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
 import { useBooking } from '@/context/BookingContext';
+import FadeIn from '@/components/animations/FadeIn';
+import BlurredCard from '@/components/ui/BlurredCard';
+
+// Define the departments array
+const departments = [
+  'Computer Science',
+  'Electrical Engineering',
+  'Mechanical Engineering',
+  'Civil Engineering',
+  'Chemical Engineering',
+  'Biotechnology',
+  'Physics',
+  'Chemistry',
+  'Mathematics',
+  'Management',
+  'Humanities & Social Sciences',
+  'Economics & Finance'
+];
 
 // Booking request form schema
 const bookingFormSchema = z.object({
@@ -371,4 +397,3 @@ const BookingRequest = () => {
 };
 
 export default BookingRequest;
-

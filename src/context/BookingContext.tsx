@@ -264,4 +264,5 @@ export const useBooking = () => {
   return context;
 };
 
-export { BookingRequest };
+// Using export type for re-exporting types
+export type { BookingRequest };
