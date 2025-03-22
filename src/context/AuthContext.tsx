@@ -127,12 +127,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signUp = async (email: string, password: string, name: string) => {
     setIsLoading(true);
     try {
+      // First, determine the role based on email
+      let role: UserRole = 'student';
+      
+      if (email === 'reception@bits.ac.in') {
+        role = 'reception';
+      } else if (email === 'admin@bits.ac.in') {
+        role = 'admin';
+      }
+
+      // Create the user
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
           data: {
             name: name,
+            role: role
           },
         },
       });
@@ -144,6 +155,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           variant: 'destructive',
         });
         throw error;
+      }
+
+      // If signup is successful, manually create the profile
+      if (data.user) {
+        // Create profile entry
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .insert({
+            id: data.user.id,
+            email: email,
+            name: name,
+            role: role,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+
+        if (profileError) {
+          console.error('Error creating profile:', profileError);
+          toast({
+            title: 'Profile creation failed',
+            description: 'Your account was created but profile setup failed.',
+            variant: 'destructive',
+          });
+        }
       }
 
       toast({
