@@ -2,363 +2,203 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
+import { FolderUp, FileText, AlertCircle, Check, Loader2 } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import { BookMarked, Calendar, Check, FileCheck, FileUp, Loader2, Upload, User, X } from 'lucide-react';
-import BlurredCard from '@/components/ui/BlurredCard';
-import FadeIn from '@/components/animations/FadeIn';
-import { format } from 'date-fns';
-import { useBooking } from '@/context/BookingContext';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/context/AuthContext';
+import { useBooking, BookingRequest } from '@/context/BookingContext';
 
 const DocumentUpload = () => {
   const { requestId } = useParams<{ requestId: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { getRequestById, uploadDocuments } = useBooking();
+  const { user } = useAuth();
+  const { allRequests, userRequests, uploadDocuments, refreshBookings } = useBooking();
   
-  const [profileImage, setProfileImage] = useState<string | null>(null);
-  const [documents, setDocuments] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
-  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
-  
-  // Mock required documents
-  const requiredDocuments = [
-    'ID Proof',
-    'Authorization Letter',
-    'Department Approval',
-  ];
-  
-  // Get booking request details
-  const bookingRequest = requestId ? getRequestById(requestId) : undefined;
-  
-  // Redirect if request not found or not approved
+  const [file, setFile] = useState<File | null>(null);
+  const [bookingRequest, setBookingRequest] = useState<BookingRequest | null>(null);
+
+  // Find the booking request from either the user's requests or all requests
   useEffect(() => {
-    if (!bookingRequest) {
+    if (requestId) {
+      const foundRequest = [...userRequests, ...allRequests].find(request => request.id === requestId);
+      if (foundRequest) {
+        setBookingRequest(foundRequest);
+      }
+      setIsLoading(false);
+    }
+  }, [requestId, userRequests, allRequests]);
+
+  // Redirect to dashboard if the request doesn't belong to the user
+  useEffect(() => {
+    if (!isLoading && !bookingRequest && user?.role === 'student') {
       toast({
-        title: 'Request Not Found',
-        description: 'The booking request could not be found.',
-        variant: 'destructive',
+        title: "Error",
+        description: "Booking request not found or you don't have permission to view it.",
+        variant: "destructive",
       });
       navigate('/student');
-      return;
     }
-    
-    if (bookingRequest.status !== 'approved') {
-      toast({
-        title: 'Not Approved',
-        description: 'Only approved booking requests require document uploads.',
-        variant: 'destructive',
-      });
-      navigate('/student');
-      return;
-    }
-    
-    // Pre-fill existing documents if any
-    if (bookingRequest.documents) {
-      setDocuments(bookingRequest.documents);
-    }
-    
-    if (bookingRequest.profileImage) {
-      setProfileImage(bookingRequest.profileImage);
-    }
-  }, [bookingRequest, navigate, toast]);
-  
-  // Format date for display
-  const formatDate = (date: Date) => {
-    return format(date, 'MMM d, yyyy');
-  };
-  
-  // Handle profile image change
-  const handleProfileImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  }, [isLoading, bookingRequest, navigate, user, toast]);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target && typeof event.target.result === 'string') {
-          setProfileImage(event.target.result);
-        }
-      };
-      reader.readAsDataURL(e.target.files[0]);
+      const selectedFile = e.target.files[0];
+      // Check file size (max 5MB)
+      if (selectedFile.size > 5 * 1024 * 1024) {
+        toast({
+          title: "File too large",
+          description: "Please select a file smaller than 5MB.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setFile(selectedFile);
     }
   };
-  
-  // Handle document file change
-  const handleDocumentChange = (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target && typeof event.target.result === 'string') {
-          const newDocuments = [...documents];
-          newDocuments[index] = event.target.result;
-          setDocuments(newDocuments);
-        }
-      };
-      reader.readAsDataURL(e.target.files[0]);
-    }
-  };
-  
-  // Remove a document
-  const removeDocument = (index: number) => {
-    const newDocuments = [...documents];
-    newDocuments[index] = '';
-    setDocuments(newDocuments);
-  };
-  
-  // Check if form is complete
-  const isFormComplete = () => {
-    return profileImage && documents.filter(Boolean).length === requiredDocuments.length;
-  };
-  
-  // Handle form submission
-  const handleSubmit = async () => {
-    if (!requestId) return;
-    
-    setIsUploading(true);
+
+  const handleUpload = async () => {
+    if (!file || !user || !requestId) return;
+
     try {
-      await uploadDocuments(
-        requestId,
-        documents.filter(Boolean),
-        profileImage || undefined
-      );
+      setIsUploading(true);
+      
+      // Upload file to Supabase Storage
+      const fileExt = file.name.split('.').pop();
+      const filePath = `${user.id}/${requestId}/${Date.now()}.${fileExt}`;
+      
+      const { error: uploadError, data } = await supabase.storage
+        .from('documents')
+        .upload(filePath, file);
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      // Get public URL for the uploaded file
+      const { data: { publicUrl } } = supabase.storage
+        .from('documents')
+        .getPublicUrl(filePath);
+
+      // Update booking request with document URL
+      await uploadDocuments(requestId, publicUrl);
       
       toast({
-        title: 'Documents Uploaded',
-        description: 'Your documents have been successfully uploaded.',
+        title: "Document Uploaded",
+        description: "Your document has been uploaded successfully.",
       });
       
+      // Refresh booking data
+      await refreshBookings();
+      
+      // Navigate back to student dashboard
       navigate('/student');
     } catch (error) {
+      console.error('Error uploading document:', error);
       toast({
-        title: 'Upload Failed',
-        description: 'There was a problem uploading your documents. Please try again.',
-        variant: 'destructive',
+        title: "Upload Error",
+        description: "Failed to upload document. Please try again.",
+        variant: "destructive",
       });
     } finally {
       setIsUploading(false);
     }
   };
 
-  if (!bookingRequest) {
-    return null; // Will redirect in useEffect
+  if (isLoading) {
+    return (
+      <div className="container mx-auto max-w-2xl py-20 flex justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-academic" />
+      </div>
+    );
   }
 
   return (
-    <div className="container mx-auto px-4 py-12">
-      <FadeIn>
-        <div className="mb-8">
-          <h1 className="text-3xl md:text-4xl font-serif font-bold text-academic mb-2">
-            Document Upload
-          </h1>
-          <p className="text-academic-text/70">
-            Upload the required documents for your approved hostel booking.
-          </p>
-        </div>
+    <div className="container mx-auto max-w-2xl py-20">
+      <Card className="shadow-lg">
+        <CardHeader>
+          <CardTitle className="text-academic">Upload Supporting Documents</CardTitle>
+          <CardDescription>
+            Upload documents to support your hostel booking request
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {bookingRequest && (
+            <div className="bg-muted/50 p-4 rounded-md">
+              <h3 className="font-medium mb-2">Request Details</h3>
+              <p className="text-sm mb-1">
+                <span className="font-medium">Request Type:</span> {bookingRequest.requestType}
+              </p>
+              <p className="text-sm">
+                <span className="font-medium">Status:</span> {bookingRequest.status}
+              </p>
+            </div>
+          )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Booking Details Sidebar */}
-          <div className="lg:col-span-1">
-            <BlurredCard className="sticky top-24">
-              <div className="flex items-center gap-2 mb-6">
-                <BookMarked className="h-5 w-5 text-academic" />
-                <h2 className="font-serif font-bold text-lg text-academic">
-                  Booking Details
-                </h2>
-              </div>
-              
-              <div className="space-y-4">
-                <div>
-                  <label className="text-sm text-academic-text/70">Request ID</label>
-                  <p className="font-medium">{bookingRequest.id}</p>
-                </div>
-                
-                <div>
-                  <label className="text-sm text-academic-text/70">Department</label>
-                  <p className="font-medium">{bookingRequest.department}</p>
-                </div>
-                
-                <div>
-                  <label className="text-sm text-academic-text/70">Date Range</label>
-                  <div className="flex items-center">
-                    <Calendar className="h-4 w-4 text-academic-light mr-2" />
-                    <p className="font-medium">
-                      {formatDate(bookingRequest.startDate)} - {formatDate(bookingRequest.endDate)}
-                    </p>
-                  </div>
-                </div>
-                
-                <div>
-                  <label className="text-sm text-academic-text/70">Number of Rooms</label>
-                  <p className="font-medium">{bookingRequest.numberOfRooms}</p>
-                </div>
-                
-                <div>
-                  <label className="text-sm text-academic-text/70">Room Type</label>
-                  <p className="font-medium capitalize">{bookingRequest.requestType}</p>
-                </div>
-                
-                <Separator />
-                
-                <div>
-                  <label className="text-sm text-academic-text/70">SPOC</label>
-                  <p className="font-medium">{bookingRequest.spoc.name}</p>
-                  <p className="text-sm text-academic-text/70">{bookingRequest.spoc.email}</p>
-                </div>
-              </div>
-            </BlurredCard>
-          </div>
+          <Alert>
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Important</AlertTitle>
+            <AlertDescription>
+              Please upload any supporting documents for your booking request. 
+              This may include authorization letters, event details, or guest information.
+            </AlertDescription>
+          </Alert>
 
-          {/* Document Upload Form */}
-          <div className="lg:col-span-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Required Documents</CardTitle>
-                <CardDescription>
-                  Please upload all the required documents below. All documents must be in PDF, JPG, or PNG format.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                {/* Profile Photo Upload */}
-                <div>
-                  <Label htmlFor="profile" className="block mb-2">Profile Photo</Label>
-                  <div className="flex items-center gap-4">
-                    <div className="w-24 h-24 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden">
-                      {profileImage ? (
-                        <img 
-                          src={profileImage} 
-                          alt="Profile Preview" 
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <User className="h-10 w-10 text-gray-400" />
-                      )}
-                    </div>
-                    <div className="flex-1">
-                      <Input
-                        id="profile"
-                        type="file"
-                        accept="image/*"
-                        className="cursor-pointer"
-                        onChange={handleProfileImageChange}
-                      />
-                      <p className="text-sm text-gray-500 mt-1">
-                        Upload a clear profile photo. Max size: 2MB.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-                
-                <Separator />
-                
-                {/* Document Uploads */}
-                {requiredDocuments.map((doc, index) => (
-                  <div key={index}>
-                    <Label htmlFor={`doc-${index}`} className="block mb-2">{doc}</Label>
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 flex-shrink-0 rounded-md bg-gray-100 flex items-center justify-center overflow-hidden">
-                        {documents[index] ? (
-                          <FileCheck className="h-6 w-6 text-green-500" />
-                        ) : (
-                          <FileUp className="h-6 w-6 text-gray-400" />
-                        )}
-                      </div>
-                      <div className="flex-1">
-                        {documents[index] ? (
-                          <div className="flex items-center justify-between bg-gray-50 p-2 rounded-md">
-                            <span className="text-sm font-medium truncate">Document uploaded</span>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => removeDocument(index)}
-                              className="h-8 w-8 p-0"
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        ) : (
-                          <Input
-                            id={`doc-${index}`}
-                            type="file"
-                            accept=".pdf,.jpg,.jpeg,.png"
-                            className="cursor-pointer"
-                            onChange={(e) => handleDocumentChange(index, e)}
-                          />
-                        )}
-                        <p className="text-sm text-gray-500 mt-1">
-                          Upload {doc} document. Accepted formats: PDF, JPG, PNG.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </CardContent>
-              <CardFooter className="flex justify-between">
-                <Button 
-                  variant="outline" 
-                  onClick={() => navigate('/student')}
-                  disabled={isUploading}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  disabled={!isFormComplete() || isUploading}
-                  onClick={() => setShowConfirmDialog(true)}
-                  className="bg-academic hover:bg-academic/90"
-                >
-                  {isUploading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Uploading...
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="mr-2 h-4 w-4" />
-                      Submit Documents
-                    </>
-                  )}
-                </Button>
-              </CardFooter>
-            </Card>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="document">Upload Document (PDF, DOC, DOCX, Max 5MB)</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="document"
+                  type="file"
+                  accept=".pdf,.doc,.docx"
+                  onChange={handleFileChange}
+                  className="flex-1"
+                />
+              </div>
+            </div>
+
+            {file && (
+              <div className="flex items-center gap-2 p-2 bg-muted/30 rounded-md">
+                <FileText className="h-5 w-5 text-academic" />
+                <span className="text-sm text-slate-600 flex-1 truncate">{file.name}</span>
+                <span className="text-xs text-slate-500">
+                  {(file.size / 1024).toFixed(1)} KB
+                </span>
+                <Check className="h-4 w-4 text-green-500" />
+              </div>
+            )}
           </div>
-        </div>
-      </FadeIn>
-      
-      {/* Confirmation Dialog */}
-      <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirm Document Submission</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to submit these documents? Please verify that all information is correct and all required documents are uploaded.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleSubmit} className="bg-academic hover:bg-academic/90">
-              <Check className="mr-2 h-4 w-4" />
-              Confirm Submission
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        </CardContent>
+        <CardFooter className="flex justify-between">
+          <Button variant="outline" onClick={() => navigate('/student')}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleUpload} 
+            disabled={!file || isUploading}
+            className="bg-academic hover:bg-academic/90 btn-transition"
+          >
+            {isUploading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Uploading...
+              </>
+            ) : (
+              <>
+                <FolderUp className="mr-2 h-4 w-4" />
+                Upload Document
+              </>
+            )}
+          </Button>
+        </CardFooter>
+      </Card>
     </div>
   );
 };

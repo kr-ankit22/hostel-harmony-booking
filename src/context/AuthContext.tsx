@@ -3,6 +3,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { User as SupabaseUser } from '@supabase/supabase-js';
 import { toast } from '@/hooks/use-toast';
+import { Database } from '@/types/database.types';
 
 // Define user types
 export type UserRole = 'student' | 'reception' | 'admin' | null;
@@ -67,7 +68,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('name, email, role, department, profile_image')
+        .select('*')
         .eq('id', supabaseUser.id)
         .single();
 
@@ -82,8 +83,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           name: data.name,
           email: data.email,
           role: data.role as UserRole,
-          department: data.department,
-          profileImage: data.profile_image,
+          department: data.department || undefined,
+          profileImage: data.profile_image || undefined,
         });
       }
     } catch (error) {

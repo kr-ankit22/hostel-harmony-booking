@@ -1,668 +1,398 @@
 
 import React, { useState } from 'react';
-import { 
-  Award,
-  BookMarked, 
-  Building, 
-  Calendar, 
-  CheckCircle2, 
-  Clock, 
-  FileText, 
-  Filter, 
-  PieChart, 
-  Search, 
-  User, 
-  XCircle 
-} from 'lucide-react';
-import { format } from 'date-fns';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
-import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import BlurredCard from '@/components/ui/BlurredCard';
-import FadeIn from '@/components/animations/FadeIn';
-import { useAuth } from '@/context/AuthContext';
-import { useBooking, BookingRequest } from '@/context/BookingContext';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
+import { BarChart, LineChart, Cell, Area, AreaChart, ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Bar, Line } from 'recharts';
+import { format } from 'date-fns';
+import { FileText, AlertCircle, ClipboardCheck, AlertTriangle, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useBooking, BookingRequest } from '@/context/BookingContext';
 
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
-
+// Reception dashboard
 const ReceptionDashboard = () => {
-  const { user } = useAuth();
-  const { bookingRequests, bookingStats, updateRequestStatus } = useBooking();
   const { toast } = useToast();
-  
-  // State for request review dialog
-  const [selectedRequest, setSelectedRequest] = useState<BookingRequest | null>(null);
-  const [showReviewDialog, setShowReviewDialog] = useState(false);
-  const [reviewNote, setReviewNote] = useState('');
-  const [selectedPriority, setSelectedPriority] = useState<'low' | 'medium' | 'high'>('medium');
+  const { allRequests, updateBookingStatus, isLoading } = useBooking();
+  const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
+  const [statusNote, setStatusNote] = useState('');
+  const [newStatus, setNewStatus] = useState('');
+  const [priority, setPriority] = useState<number>(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  
-  // Filter requests that are pending or approved by reception (not yet reviewed by admin)
-  const filteredRequests = bookingRequests.filter(request => {
-    // First apply status filter
-    if (statusFilter !== 'all') {
-      if (statusFilter === 'pending' && request.status !== 'pending') return false;
-      if (statusFilter === 'approved' && request.status !== 'reception-approved') return false;
-    } else {
-      // For 'all' tab, only show pending and reception-approved
-      if (request.status !== 'pending' && request.status !== 'reception-approved') return false;
+  const [openDialog, setOpenDialog] = useState(false);
+
+  // Status color mapping
+  const getStatusColor = (status: string) => {
+    switch (status.toLowerCase()) {
+      case 'pending': return 'bg-yellow-100 text-yellow-800';
+      case 'approved': return 'bg-green-100 text-green-800';
+      case 'rejected': return 'bg-red-100 text-red-800';
+      case 'in review': return 'bg-blue-100 text-blue-800';
+      default: return 'bg-gray-100 text-gray-800';
     }
-    
-    // Then apply search filter
-    if (searchTerm) {
-      const search = searchTerm.toLowerCase();
-      return (
-        request.userName.toLowerCase().includes(search) ||
-        request.department.toLowerCase().includes(search) ||
-        request.reason.toLowerCase().includes(search)
-      );
-    }
-    
-    return true;
-  });
-  
-  // Handle request approval by reception
-  const handleApproveRequest = async () => {
-    if (!selectedRequest) return;
-    
-    setIsSubmitting(true);
+  };
+
+  // Format date for display
+  const formatDate = (date: Date) => {
+    return format(date, 'MMM dd, yyyy');
+  };
+
+  // Handle open update dialog
+  const handleOpenUpdate = (request: BookingRequest) => {
+    setActiveRequestId(request.id);
+    setStatusNote(request.receptionNote || '');
+    setNewStatus(request.status);
+    setPriority(request.priority || 0);
+    setOpenDialog(true);
+  };
+
+  // Handle update status
+  const handleUpdateStatus = async () => {
+    if (!activeRequestId || !newStatus) return;
+
     try {
-      await updateRequestStatus(
-        selectedRequest.id, 
-        'reception-approved', 
-        reviewNote, 
-        selectedPriority
-      );
-      
+      setIsSubmitting(true);
+      await updateBookingStatus(activeRequestId, newStatus, statusNote, priority);
+      setOpenDialog(false);
       toast({
-        title: 'Request Approved',
-        description: 'The request has been approved and sent to admin for final review.',
+        title: "Status Updated",
+        description: `Request status has been changed to ${newStatus}`,
       });
-      
-      setShowReviewDialog(false);
-      setSelectedRequest(null);
-      setReviewNote('');
     } catch (error) {
+      console.error('Error updating status:', error);
       toast({
-        title: 'Error',
-        description: 'Failed to update request status. Please try again.',
-        variant: 'destructive',
+        title: "Update Failed",
+        description: "Failed to update the booking status",
+        variant: "destructive",
       });
     } finally {
       setIsSubmitting(false);
     }
   };
-  
-  // Handle request rejection by reception
-  const handleRejectRequest = async () => {
-    if (!selectedRequest) return;
-    
-    setIsSubmitting(true);
-    try {
-      await updateRequestStatus(
-        selectedRequest.id, 
-        'rejected', 
-        reviewNote
-      );
-      
-      toast({
-        title: 'Request Rejected',
-        description: 'The request has been rejected.',
-      });
-      
-      setShowReviewDialog(false);
-      setSelectedRequest(null);
-      setReviewNote('');
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to update request status. Please try again.',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
+
+  // Get request statistics
+  const getRequestStats = () => {
+    const pendingCount = allRequests.filter(r => r.status === 'pending').length;
+    const approvedCount = allRequests.filter(r => r.status === 'approved').length;
+    const rejectedCount = allRequests.filter(r => r.status === 'rejected').length;
+    const inReviewCount = allRequests.filter(r => r.status === 'in review').length;
+
+    const totalRooms = allRequests.reduce((sum, req) => 
+      req.status === 'approved' ? sum + req.numberOfRooms : sum, 0);
+
+    return [
+      { name: 'Pending', value: pendingCount, color: '#fbbf24' },
+      { name: 'In Review', value: inReviewCount, color: '#60a5fa' },
+      { name: 'Approved', value: approvedCount, color: '#34d399' },
+      { name: 'Rejected', value: rejectedCount, color: '#f87171' },
+      { name: 'Rooms Booked', value: totalRooms, color: '#8b5cf6' },
+    ];
   };
-  
-  // Format date range for display
-  const formatDateRange = (startDate: Date, endDate: Date) => {
-    return `${format(startDate, 'MMM d, yyyy')} - ${format(endDate, 'MMM d, yyyy')}`;
+
+  // Get request data by department
+  const getDepartmentData = () => {
+    const departments = [...new Set(allRequests.map(req => req.department))];
+    return departments.map(dept => {
+      const deptRequests = allRequests.filter(req => req.department === dept);
+      return {
+        name: dept,
+        total: deptRequests.length,
+        approved: deptRequests.filter(req => req.status === 'approved').length,
+        pending: deptRequests.filter(req => req.status === 'pending').length,
+        rejected: deptRequests.filter(req => req.status === 'rejected').length,
+      };
+    });
   };
-  
-  // Calculate days between two dates
-  const getDaysBetween = (startDate: Date, endDate: Date) => {
-    const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+  // Generate mock trend data (in a real app, this would come from the database)
+  const getTrendData = () => {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
+    return months.map(month => ({
+      name: month,
+      requests: Math.floor(Math.random() * 50) + 10,
+      approvals: Math.floor(Math.random() * 40) + 5,
+    }));
   };
-  
-  // Get status badge color
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'pending':
-        return <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">Pending</Badge>;
-      case 'reception-approved':
-        return <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">Approved by Reception</Badge>;
-      default:
-        return <Badge variant="outline">{status}</Badge>;
-    }
-  };
-  
-  // Get priority badge
-  const getPriorityBadge = (priority: string) => {
-    switch (priority) {
-      case 'low':
-        return <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200">Low Priority</Badge>;
-      case 'medium':
-        return <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">Medium Priority</Badge>;
-      case 'high':
-        return <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">High Priority</Badge>;
-      default:
-        return null;
-    }
-  };
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="container mx-auto py-20 flex justify-center items-center min-h-[calc(100vh-4rem)]">
+        <div className="flex flex-col items-center gap-2">
+          <Loader2 className="h-10 w-10 animate-spin text-academic" />
+          <p className="text-academic font-medium">Loading dashboard data...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="container mx-auto px-4 py-12">
-      <FadeIn>
-        <div className="mb-8">
-          <h1 className="text-3xl md:text-4xl font-serif font-bold text-academic mb-2">
-            Reception Dashboard
-          </h1>
-          <p className="text-academic-text/70">
-            Welcome back, {user?.name}. Manage hostel booking requests here.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Sidebar with Stats */}
-          <div className="lg:col-span-1">
-            <div className="space-y-6">
-              <BlurredCard>
-                <h2 className="font-serif font-bold text-lg text-academic mb-4">
-                  Hostel Statistics
-                </h2>
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center">
-                      <div className="bg-academic-light/10 p-2 rounded-full mr-3">
-                        <Building className="h-5 w-5 text-academic" />
-                      </div>
-                      <span className="text-sm text-academic-text/70">Total Rooms</span>
-                    </div>
-                    <span className="font-semibold">{bookingStats.totalRooms}</span>
-                  </div>
-                  
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center">
-                      <div className="bg-green-100 p-2 rounded-full mr-3">
-                        <CheckCircle2 className="h-5 w-5 text-green-600" />
-                      </div>
-                      <span className="text-sm text-academic-text/70">Available</span>
-                    </div>
-                    <span className="font-semibold">{bookingStats.availableRooms}</span>
-                  </div>
-                  
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center">
-                      <div className="bg-academic-gold/10 p-2 rounded-full mr-3">
-                        <BookMarked className="h-5 w-5 text-academic-gold" />
-                      </div>
-                      <span className="text-sm text-academic-text/70">Pending</span>
-                    </div>
-                    <span className="font-semibold">{bookingStats.pendingRequests}</span>
-                  </div>
-                  
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center">
-                      <div className="bg-academic-light/10 p-2 rounded-full mr-3">
-                        <User className="h-5 w-5 text-academic" />
-                      </div>
-                      <span className="text-sm text-academic-text/70">Occupied</span>
-                    </div>
-                    <span className="font-semibold">{bookingStats.approvedRequests}</span>
-                  </div>
-                </div>
-              </BlurredCard>
-              
-              <BlurredCard>
-                <h2 className="font-serif font-bold text-lg text-academic mb-4">
-                  Quick Actions
-                </h2>
-                <div className="space-y-2">
-                  <Button variant="outline" className="w-full justify-start">
-                    <PieChart className="mr-2 h-4 w-4" />
-                    View Booking Report
-                  </Button>
-                  <Button variant="outline" className="w-full justify-start">
-                    <Calendar className="mr-2 h-4 w-4" />
-                    Manage Room Calendar
-                  </Button>
-                  <Button variant="outline" className="w-full justify-start">
-                    <FileText className="mr-2 h-4 w-4" />
-                    Request History
-                  </Button>
-                </div>
-              </BlurredCard>
-            </div>
-          </div>
-
-          {/* Main Content */}
-          <div className="lg:col-span-3">
-            <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium">Total Pending</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center">
-                    <Clock className="h-5 w-5 text-yellow-500 mr-2" />
-                    <span className="text-2xl font-bold">
-                      {bookingRequests.filter(r => r.status === 'pending').length}
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
-              
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium">Room Availability</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center">
-                    <Building className="h-5 w-5 text-academic-light mr-2" />
-                    <span className="text-2xl font-bold">
-                      {Math.round((bookingStats.availableRooms / bookingStats.totalRooms) * 100)}%
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
-              
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium">High Priority</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center">
-                    <Award className="h-5 w-5 text-orange-500 mr-2" />
-                    <span className="text-2xl font-bold">
-                      {bookingRequests.filter(r => r.priority === 'high' && (r.status === 'pending' || r.status === 'reception-approved')).length}
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-            
-            <BlurredCard className="mb-6">
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                <div className="relative flex-grow max-w-md">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <Input
-                    placeholder="Search by name, department, or reason..."
-                    className="pl-9"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <Filter className="h-4 w-4 text-academic-text/70" />
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="Filter by status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="approved">Approved by Reception</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </BlurredCard>
-            
-            <Tabs defaultValue="all" className="w-full">
-              <TabsList className="mb-4 bg-white">
-                <TabsTrigger value="all" className="data-[state=active]:bg-academic data-[state=active]:text-white">
-                  All Requests
-                </TabsTrigger>
-                <TabsTrigger value="pending" className="data-[state=active]:bg-academic data-[state=active]:text-white">
-                  Pending
-                </TabsTrigger>
-                <TabsTrigger value="priority" className="data-[state=active]:bg-academic data-[state=active]:text-white">
-                  High Priority
-                </TabsTrigger>
-              </TabsList>
-              
-              <TabsContent value="all" className="space-y-4">
-                {filteredRequests.length > 0 ? (
-                  filteredRequests.map((request) => (
-                    <BlurredCard key={request.id} className="overflow-hidden hover:shadow-md transition-shadow">
-                      <div className="flex flex-col md:flex-row gap-4">
-                        {/* Request details */}
-                        <div className="flex-grow">
-                          <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
-                            <div>
-                              <h3 className="text-lg font-semibold text-academic">
-                                {request.userName}
-                              </h3>
-                              <p className="text-academic-text/70 text-sm">
-                                {request.department}
-                              </p>
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              {getStatusBadge(request.status)}
-                              {getPriorityBadge(request.priority)}
-                            </div>
-                          </div>
-                          
-                          <div className="space-y-2 mb-4">
-                            <div className="flex items-center text-sm">
-                              <Calendar className="mr-2 h-4 w-4 text-academic-light" />
-                              <span>{formatDateRange(request.startDate, request.endDate)}</span>
-                              <span className="mx-2 text-gray-400">|</span>
-                              <span className="text-academic-text/70">{getDaysBetween(request.startDate, request.endDate)} days</span>
-                            </div>
-                            <div className="text-sm">
-                              <span className="font-medium">Rooms:</span> {request.numberOfRooms}
-                            </div>
-                            <div className="text-sm">
-                              <span className="font-medium">SPOC:</span> {request.spoc.name} ({request.spoc.email})
-                            </div>
-                            <div className="text-sm">
-                              <span className="font-medium">Request Type:</span> {request.requestType.charAt(0).toUpperCase() + request.requestType.slice(1)}
-                            </div>
-                            <div className="text-sm">
-                              <span className="font-medium">Reason:</span> {request.reason.length > 100 ? `${request.reason.substring(0, 100)}...` : request.reason}
-                            </div>
-                          </div>
-                        </div>
-                        
-                        {/* Action buttons */}
-                        <div className="flex md:flex-col justify-between md:justify-center gap-2">
-                          <Button
-                            variant="default"
-                            className="bg-academic hover:bg-academic/90"
-                            onClick={() => {
-                              setSelectedRequest(request);
-                              setSelectedPriority(request.priority);
-                              setShowReviewDialog(true);
-                            }}
-                          >
-                            Review
-                          </Button>
-                        </div>
-                      </div>
-                    </BlurredCard>
-                  ))
-                ) : (
-                  <BlurredCard className="text-center py-8">
-                    <CheckCircle2 className="h-12 w-12 mx-auto text-academic-light/50 mb-4" />
-                    <h3 className="text-lg font-medium text-academic mb-2">All Caught Up!</h3>
-                    <p className="text-academic-text/70">There are no requests pending review at this time.</p>
-                  </BlurredCard>
-                )}
-              </TabsContent>
-              
-              <TabsContent value="pending">
-                {/* Similar content as 'all' but filtered only for pending */}
-                {filteredRequests.filter(r => r.status === 'pending').length > 0 ? (
-                  filteredRequests.filter(r => r.status === 'pending').map((request) => (
-                    <BlurredCard key={request.id} className="overflow-hidden hover:shadow-md transition-shadow">
-                      {/* Same card content as above */}
-                      <div className="flex flex-col md:flex-row gap-4">
-                        <div className="flex-grow">
-                          <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
-                            <div>
-                              <h3 className="text-lg font-semibold text-academic">
-                                {request.userName}
-                              </h3>
-                              <p className="text-academic-text/70 text-sm">
-                                {request.department}
-                              </p>
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              {getStatusBadge(request.status)}
-                              {getPriorityBadge(request.priority)}
-                            </div>
-                          </div>
-                          
-                          <div className="space-y-2 mb-4">
-                            <div className="flex items-center text-sm">
-                              <Calendar className="mr-2 h-4 w-4 text-academic-light" />
-                              <span>{formatDateRange(request.startDate, request.endDate)}</span>
-                              <span className="mx-2 text-gray-400">|</span>
-                              <span className="text-academic-text/70">{getDaysBetween(request.startDate, request.endDate)} days</span>
-                            </div>
-                            <div className="text-sm">
-                              <span className="font-medium">Rooms:</span> {request.numberOfRooms}
-                            </div>
-                            <div className="text-sm">
-                              <span className="font-medium">SPOC:</span> {request.spoc.name} ({request.spoc.email})
-                            </div>
-                            <div className="text-sm">
-                              <span className="font-medium">Request Type:</span> {request.requestType.charAt(0).toUpperCase() + request.requestType.slice(1)}
-                            </div>
-                            <div className="text-sm">
-                              <span className="font-medium">Reason:</span> {request.reason.length > 100 ? `${request.reason.substring(0, 100)}...` : request.reason}
-                            </div>
-                          </div>
-                        </div>
-                        
-                        <div className="flex md:flex-col justify-between md:justify-center gap-2">
-                          <Button
-                            variant="default"
-                            className="bg-academic hover:bg-academic/90"
-                            onClick={() => {
-                              setSelectedRequest(request);
-                              setSelectedPriority(request.priority);
-                              setShowReviewDialog(true);
-                            }}
-                          >
-                            Review
-                          </Button>
-                        </div>
-                      </div>
-                    </BlurredCard>
-                  ))
-                ) : (
-                  <BlurredCard className="text-center py-8">
-                    <CheckCircle2 className="h-12 w-12 mx-auto text-academic-light/50 mb-4" />
-                    <h3 className="text-lg font-medium text-academic mb-2">All Caught Up!</h3>
-                    <p className="text-academic-text/70">There are no pending requests at this time.</p>
-                  </BlurredCard>
-                )}
-              </TabsContent>
-              
-              <TabsContent value="priority">
-                {/* Similar content but filtered for high priority */}
-                {filteredRequests.filter(r => r.priority === 'high').length > 0 ? (
-                  filteredRequests.filter(r => r.priority === 'high').map((request) => (
-                    <BlurredCard key={request.id} className="overflow-hidden hover:shadow-md transition-shadow">
-                      {/* Same card content as above */}
-                      <div className="flex flex-col md:flex-row gap-4">
-                        <div className="flex-grow">
-                          <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
-                            <div>
-                              <h3 className="text-lg font-semibold text-academic">
-                                {request.userName}
-                              </h3>
-                              <p className="text-academic-text/70 text-sm">
-                                {request.department}
-                              </p>
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              {getStatusBadge(request.status)}
-                              {getPriorityBadge(request.priority)}
-                            </div>
-                          </div>
-                          
-                          <div className="space-y-2 mb-4">
-                            <div className="flex items-center text-sm">
-                              <Calendar className="mr-2 h-4 w-4 text-academic-light" />
-                              <span>{formatDateRange(request.startDate, request.endDate)}</span>
-                              <span className="mx-2 text-gray-400">|</span>
-                              <span className="text-academic-text/70">{getDaysBetween(request.startDate, request.endDate)} days</span>
-                            </div>
-                            <div className="text-sm">
-                              <span className="font-medium">Rooms:</span> {request.numberOfRooms}
-                            </div>
-                            <div className="text-sm">
-                              <span className="font-medium">SPOC:</span> {request.spoc.name} ({request.spoc.email})
-                            </div>
-                            <div className="text-sm">
-                              <span className="font-medium">Request Type:</span> {request.requestType.charAt(0).toUpperCase() + request.requestType.slice(1)}
-                            </div>
-                            <div className="text-sm">
-                              <span className="font-medium">Reason:</span> {request.reason.length > 100 ? `${request.reason.substring(0, 100)}...` : request.reason}
-                            </div>
-                          </div>
-                        </div>
-                        
-                        <div className="flex md:flex-col justify-between md:justify-center gap-2">
-                          <Button
-                            variant="default"
-                            className="bg-academic hover:bg-academic/90"
-                            onClick={() => {
-                              setSelectedRequest(request);
-                              setSelectedPriority(request.priority);
-                              setShowReviewDialog(true);
-                            }}
-                          >
-                            Review
-                          </Button>
-                        </div>
-                      </div>
-                    </BlurredCard>
-                  ))
-                ) : (
-                  <BlurredCard className="text-center py-8">
-                    <CheckCircle2 className="h-12 w-12 mx-auto text-academic-light/50 mb-4" />
-                    <h3 className="text-lg font-medium text-academic mb-2">No High Priority Requests</h3>
-                    <p className="text-academic-text/70">There are no high priority requests at this time.</p>
-                  </BlurredCard>
-                )}
-              </TabsContent>
-            </Tabs>
-          </div>
-        </div>
-      </FadeIn>
+    <div className="container mx-auto py-6">
+      <h1 className="text-3xl font-serif font-bold text-academic mb-6">Reception Dashboard</h1>
       
-      {/* Review Request Dialog */}
-      <Dialog open={showReviewDialog} onOpenChange={setShowReviewDialog}>
-        <DialogContent className="sm:max-w-[500px]">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        {getRequestStats().map((stat, index) => (
+          <Card key={index} className="hover:shadow-md transition-shadow">
+            <CardHeader className="pb-2">
+              <CardDescription>{stat.name}</CardDescription>
+              <CardTitle className="text-2xl">{stat.value}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="h-1 w-full bg-gray-200 rounded-full overflow-hidden">
+                <div 
+                  className="h-full rounded-full" 
+                  style={{ width: `${Math.min(100, (stat.value / Math.max(...getRequestStats().map(s => s.value))) * 100)}%`, backgroundColor: stat.color }}
+                />
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+      
+      <Tabs defaultValue="requests" className="mb-8">
+        <TabsList className="mb-6">
+          <TabsTrigger value="requests">All Requests</TabsTrigger>
+          <TabsTrigger value="analytics">Analytics</TabsTrigger>
+        </TabsList>
+        
+        {/* Requests Tab */}
+        <TabsContent value="requests" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Booking Requests</CardTitle>
+              <CardDescription>
+                Review and manage all booking requests
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">ID</th>
+                      <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Type</th>
+                      <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Department</th>
+                      <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Rooms</th>
+                      <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Date Range</th>
+                      <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">SPOC</th>
+                      <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Status</th>
+                      <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Priority</th>
+                      <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {allRequests.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="px-4 py-6 text-center text-muted-foreground">
+                          No booking requests found
+                        </td>
+                      </tr>
+                    ) : (
+                      allRequests.map((request) => (
+                        <tr key={request.id} className="hover:bg-muted/30">
+                          <td className="px-4 py-3 text-sm">{request.id.slice(0, 8)}...</td>
+                          <td className="px-4 py-3 text-sm">{request.requestType}</td>
+                          <td className="px-4 py-3 text-sm">{request.department}</td>
+                          <td className="px-4 py-3 text-sm">{request.numberOfRooms}</td>
+                          <td className="px-4 py-3 text-sm">
+                            {formatDate(request.startDate)} - {formatDate(request.endDate)}
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            <div className="flex flex-col">
+                              <span>{request.spoc.name}</span>
+                              <span className="text-xs text-muted-foreground">{request.spoc.email}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            <Badge className={getStatusColor(request.status)}>
+                              {request.status}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            {request.priority || 0}
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-xs"
+                              onClick={() => handleOpenUpdate(request)}
+                            >
+                              <ClipboardCheck className="h-3 w-3 mr-1" />
+                              Review
+                            </Button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+        
+        {/* Analytics Tab */}
+        <TabsContent value="analytics" className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Requests by Status</CardTitle>
+                <CardDescription>
+                  Distribution of requests by their current status
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={getRequestStats().slice(0, 4)}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="value" name="Count">
+                      {getRequestStats().slice(0, 4).map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+            
+            <Card>
+              <CardHeader>
+                <CardTitle>Request Trends</CardTitle>
+                <CardDescription>
+                  Monthly trends of requests and approvals
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={getTrendData()}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Line type="monotone" dataKey="requests" stroke="#8884d8" name="Total Requests" />
+                    <Line type="monotone" dataKey="approvals" stroke="#82ca9d" name="Approvals" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+            
+            <Card className="md:col-span-2">
+              <CardHeader>
+                <CardTitle>Requests by Department</CardTitle>
+                <CardDescription>
+                  Distribution of requests across different departments
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={getDepartmentData()} barSize={20}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="pending" stackId="a" name="Pending" fill="#fbbf24" />
+                    <Bar dataKey="approved" stackId="a" name="Approved" fill="#34d399" />
+                    <Bar dataKey="rejected" stackId="a" name="Rejected" fill="#f87171" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
+      
+      {/* Dialog for updating status */}
+      <Dialog open={openDialog} onOpenChange={setOpenDialog}>
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Review Booking Request</DialogTitle>
+            <DialogTitle>Update Request Status</DialogTitle>
             <DialogDescription>
-              Review the request details and set a priority level. You can either approve or reject this request.
+              Review and update the status of this booking request
             </DialogDescription>
           </DialogHeader>
           
-          {selectedRequest && (
-            <div className="py-2">
-              <div className="grid grid-cols-2 gap-3 mb-4">
-                <div>
-                  <p className="text-sm text-academic-text/70">Requester</p>
-                  <p className="font-medium">{selectedRequest.userName}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-academic-text/70">Department</p>
-                  <p className="font-medium">{selectedRequest.department}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-academic-text/70">Date Range</p>
-                  <p className="font-medium">{formatDateRange(selectedRequest.startDate, selectedRequest.endDate)}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-academic-text/70">Number of Rooms</p>
-                  <p className="font-medium">{selectedRequest.numberOfRooms}</p>
-                </div>
-              </div>
-              
-              <div className="mb-4">
-                <p className="text-sm text-academic-text/70 mb-1">Reason</p>
-                <p className="text-sm border rounded-md p-2 bg-gray-50">{selectedRequest.reason}</p>
-              </div>
-              
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Set Priority Level</label>
-                  <Select value={selectedPriority} onValueChange={(value: any) => setSelectedPriority(value)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select priority" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="low">Low Priority</SelectItem>
-                      <SelectItem value="medium">Medium Priority</SelectItem>
-                      <SelectItem value="high">High Priority</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Reception Notes</label>
-                  <Textarea 
-                    placeholder="Add notes about room availability or other information..."
-                    value={reviewNote}
-                    onChange={(e) => setReviewNote(e.target.value)}
-                  />
-                </div>
-              </div>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="status">Status</Label>
+              <Select 
+                value={newStatus} 
+                onValueChange={setNewStatus}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select new status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="in review">In Review</SelectItem>
+                  <SelectItem value="approved">Approved</SelectItem>
+                  <SelectItem value="rejected">Rejected</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-          )}
+            
+            <div className="space-y-2">
+              <Label htmlFor="priority">Priority (0-10)</Label>
+              <Select 
+                value={priority.toString()} 
+                onValueChange={(value) => setPriority(parseInt(value))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Set priority" />
+                </SelectTrigger>
+                <SelectContent>
+                  {[...Array(11)].map((_, i) => (
+                    <SelectItem key={i} value={i.toString()}>
+                      {i} - {i === 0 ? 'Lowest' : i === 10 ? 'Highest' : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="note">Reception Note</Label>
+              <Textarea
+                id="note"
+                value={statusNote}
+                onChange={(e) => setStatusNote(e.target.value)}
+                placeholder="Add notes about this request..."
+                rows={3}
+              />
+            </div>
+          </div>
           
-          <DialogFooter className="flex flex-col sm:flex-row gap-2">
-            <Button
-              variant="outline"
-              className="flex-1 gap-2"
-              onClick={() => {
-                setShowReviewDialog(false);
-                setSelectedRequest(null);
-                setReviewNote('');
-              }}
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => setOpenDialog(false)}
               disabled={isSubmitting}
             >
               Cancel
             </Button>
             <Button 
-              variant="destructive"
-              className="flex-1 gap-2"
-              onClick={handleRejectRequest}
+              onClick={handleUpdateStatus}
               disabled={isSubmitting}
+              className="bg-academic hover:bg-academic/90 btn-transition"
             >
-              <XCircle className="h-4 w-4" />
-              Reject
-            </Button>
-            <Button 
-              className="flex-1 gap-2 bg-academic hover:bg-academic/90"
-              onClick={handleApproveRequest}
-              disabled={isSubmitting}
-            >
-              <CheckCircle2 className="h-4 w-4" />
-              Approve
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Updating...
+                </>
+              ) : (
+                'Update Status'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

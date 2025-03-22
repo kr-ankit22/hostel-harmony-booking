@@ -9,7 +9,120 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      [_ in never]: never
+      booking_requests: {
+        Row: {
+          admin_note: string | null
+          created_at: string
+          department: string
+          documents: string | null
+          end_date: string
+          id: string
+          number_of_rooms: number
+          priority: number | null
+          reason: string
+          reception_note: string | null
+          request_type: string
+          spoc_email: string
+          spoc_name: string
+          start_date: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          admin_note?: string | null
+          created_at?: string
+          department: string
+          documents?: string | null
+          end_date: string
+          id?: string
+          number_of_rooms: number
+          priority?: number | null
+          reason: string
+          reception_note?: string | null
+          request_type: string
+          spoc_email: string
+          spoc_name: string
+          start_date: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          admin_note?: string | null
+          created_at?: string
+          department?: string
+          documents?: string | null
+          end_date?: string
+          id?: string
+          number_of_rooms?: number
+          priority?: number | null
+          reason?: string
+          reception_note?: string | null
+          request_type?: string
+          spoc_email?: string
+          spoc_name?: string
+          start_date?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          department: string | null
+          email: string
+          id: string
+          name: string
+          profile_image: string | null
+          role: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          department?: string | null
+          email: string
+          id: string
+          name: string
+          profile_image?: string | null
+          role: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          department?: string | null
+          email?: string
+          id?: string
+          name?: string
+          profile_image?: string | null
+          role?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      room_inventory: {
+        Row: {
+          available_rooms: number
+          id: string
+          last_updated: string
+          total_rooms: number
+        }
+        Insert: {
+          available_rooms: number
+          id?: string
+          last_updated?: string
+          total_rooms: number
+        }
+        Update: {
+          available_rooms?: number
+          id?: string
+          last_updated?: string
+          total_rooms?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

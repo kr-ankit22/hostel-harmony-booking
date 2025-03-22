@@ -1,11 +1,8 @@
-
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { format } from 'date-fns';
-import { CalendarIcon, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Form,
@@ -17,111 +14,81 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
-import { useToast } from '@/hooks/use-toast';
+import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { format } from 'date-fns';
+import { CalendarIcon, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import BlurredCard from '@/components/ui/BlurredCard';
-import FadeIn from '@/components/animations/FadeIn';
-import { useBooking } from '@/context/BookingContext';
+import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
+import { useBooking } from '@/context/BookingContext';
 
-// Form schema
-const formSchema = z.object({
-  department: z.string().min(1, { message: 'Department is required' }),
-  startDate: z.date({
-    required_error: 'Start date is required',
-  }),
-  endDate: z.date({
-    required_error: 'End date is required',
-  }),
-  numberOfRooms: z.coerce.number().int().min(1).max(10),
-  spocName: z.string().min(1, { message: 'SPOC name is required' }),
-  spocEmail: z.string().email({ message: 'Please enter a valid email address' }),
-  requestType: z.enum(['single', 'shared', 'family', 'guest']),
-  reason: z.string().min(10, { message: 'Please provide a detailed reason for your request' }),
-}).refine(data => data.endDate > data.startDate, {
-  message: 'End date must be after start date',
-  path: ['endDate'],
+// Booking request form schema
+const bookingFormSchema = z.object({
+  requestType: z.string().min(2, { message: "Request type is required" }),
+  department: z.string().min(2, { message: "Department is required" }),
+  numberOfRooms: z.number().min(1, { message: "At least 1 room is required" }).max(50, { message: "Maximum 50 rooms allowed" }),
+  startDate: z.date(),
+  endDate: z.date(),
+  reason: z.string().min(10, { message: "Please provide a detailed reason for booking" }),
+  spocName: z.string().min(2, { message: "SPOC name is required" }),
+  spocEmail: z.string().email({ message: "Please enter a valid email address" }),
 });
 
-type FormValues = z.infer<typeof formSchema>;
+type BookingFormValues = z.infer<typeof bookingFormSchema>;
 
 const BookingRequest = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { addRequest } = useBooking();
   const { user } = useAuth();
+  const { createBookingRequest } = useBooking();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Initialize form
-  const form = useForm<FormValues>({
-    resolver: zodResolver(formSchema),
+  const form = useForm<BookingFormValues>({
+    resolver: zodResolver(bookingFormSchema),
     defaultValues: {
+      requestType: '',
       department: user?.department || '',
       numberOfRooms: 1,
-      requestType: 'single',
+      startDate: new Date(),
+      endDate: new Date(new Date().setDate(new Date().getDate() + 1)),
+      reason: '',
+      spocName: user?.name || '',
+      spocEmail: user?.email || '',
     },
   });
 
-  // Departments for demo
-  const departments = [
-    'Computer Science',
-    'Electrical Engineering',
-    'Mechanical Engineering',
-    'Chemical Engineering',
-    'Civil Engineering',
-    'Biotechnology',
-    'Pharmacy',
-    'Management',
-    'Mathematics',
-    'Physics',
-    'Chemistry',
-    'Humanities',
-  ];
-
-  const onSubmit = async (data: FormValues) => {
-    setIsSubmitting(true);
-    
+  const onSubmit = async (values: BookingFormValues) => {
     try {
-      // Transform form data to request data
-      await addRequest({
-        department: data.department,
-        startDate: data.startDate,
-        endDate: data.endDate,
-        numberOfRooms: data.numberOfRooms,
+      setIsSubmitting(true);
+      
+      const requestId = await createBookingRequest({
+        requestType: values.requestType,
+        department: values.department,
+        numberOfRooms: values.numberOfRooms,
+        startDate: values.startDate,
+        endDate: values.endDate,
+        reason: values.reason,
         spoc: {
-          name: data.spocName,
-          email: data.spocEmail,
-        },
-        requestType: data.requestType,
-        reason: data.reason,
-        priority: 'medium', // Default priority
+          name: values.spocName,
+          email: values.spocEmail
+        }
       });
       
       toast({
-        title: 'Request Submitted',
-        description: 'Your hostel booking request has been submitted successfully.',
+        title: "Booking Request Submitted",
+        description: "Your request has been successfully submitted.",
       });
       
-      navigate('/student');
+      navigate(`/document-upload/${requestId}`);
     } catch (error) {
+      console.error("Error submitting booking request:", error);
       toast({
-        title: 'Submission Failed',
-        description: 'There was a problem submitting your request. Please try again.',
-        variant: 'destructive',
+        title: "Error",
+        description: "Failed to submit booking request. Please try again.",
+        variant: "destructive",
       });
     } finally {
       setIsSubmitting(false);
@@ -144,6 +111,34 @@ const BookingRequest = () => {
           <BlurredCard>
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+                {/* Request Type */}
+                <FormField
+                  control={form.control}
+                  name="requestType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Request Type</FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select room type" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="single">Single Occupancy</SelectItem>
+                          <SelectItem value="shared">Shared Occupancy</SelectItem>
+                          <SelectItem value="family">Family Accommodation</SelectItem>
+                          <SelectItem value="guest">Guest Faculty</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        The type of accommodation required.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
                 {/* Department */}
                 <FormField
                   control={form.control}
@@ -319,34 +314,6 @@ const BookingRequest = () => {
                   />
                 </div>
 
-                {/* Request Type */}
-                <FormField
-                  control={form.control}
-                  name="requestType"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Request Type</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select room type" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="single">Single Occupancy</SelectItem>
-                          <SelectItem value="shared">Shared Occupancy</SelectItem>
-                          <SelectItem value="family">Family Accommodation</SelectItem>
-                          <SelectItem value="guest">Guest Faculty</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormDescription>
-                        The type of accommodation required.
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
                 {/* Reason for Booking */}
                 <FormField
                   control={form.control}
@@ -404,3 +371,4 @@ const BookingRequest = () => {
 };
 
 export default BookingRequest;
+

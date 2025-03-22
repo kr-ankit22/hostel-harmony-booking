@@ -3,33 +3,13 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './AuthContext';
 import { useToast } from '@/hooks/use-toast';
-
-interface Booking {
-  id: string;
-  requestType: string;
-  department: string;
-  numberOfRooms: number;
-  startDate: Date;
-  endDate: Date;
-  reason: string;
-  status: string;
-  spoc: {
-    name: string;
-    email: string;
-  };
-  receptionNote?: string;
-  adminNote?: string;
-  priority?: number;
-  documents?: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
+import { BookingRequest } from '@/types/database.types';
 
 interface BookingContextType {
-  userRequests: Booking[];
-  allRequests: Booking[];
+  userRequests: BookingRequest[];
+  allRequests: BookingRequest[];
   isLoading: boolean;
-  createBookingRequest: (bookingData: Omit<Booking, 'id' | 'status' | 'createdAt' | 'updatedAt'>) => Promise<string>;
+  createBookingRequest: (bookingData: Omit<BookingRequest, 'id' | 'status' | 'createdAt' | 'updatedAt'>) => Promise<string>;
   updateBookingStatus: (id: string, status: string, note?: string, priority?: number) => Promise<void>;
   uploadDocuments: (id: string, documentsUrl: string) => Promise<void>;
   refreshBookings: () => Promise<void>;
@@ -38,14 +18,14 @@ interface BookingContextType {
 const BookingContext = createContext<BookingContextType | undefined>(undefined);
 
 export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [userRequests, setUserRequests] = useState<Booking[]>([]);
-  const [allRequests, setAllRequests] = useState<Booking[]>([]);
+  const [userRequests, setUserRequests] = useState<BookingRequest[]>([]);
+  const [allRequests, setAllRequests] = useState<BookingRequest[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const { user } = useAuth();
   const { toast } = useToast();
 
   // Function to convert database booking to frontend format
-  const mapBookingFromDB = (booking: any): Booking => ({
+  const mapBookingFromDB = (booking: any): BookingRequest => ({
     id: booking.id,
     requestType: booking.request_type,
     department: booking.department,
@@ -72,19 +52,12 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     
     try {
       setIsLoading(true);
-      let query = supabase
+      
+      // Get all bookings based on role
+      const { data, error } = await supabase
         .from('booking_requests')
-        .select('*');
-        
-      // For student role, only fetch their own requests
-      if (user.role === 'student') {
-        query = query.eq('user_id', user.id);
-      }
-      
-      // Order by creation date, newest first
-      query = query.order('created_at', { ascending: false });
-      
-      const { data, error } = await query;
+        .select('*')
+        .order('created_at', { ascending: false });
       
       if (error) {
         console.error('Error fetching bookings:', error);
@@ -94,9 +67,15 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (data) {
         const mappedBookings = data.map(mapBookingFromDB);
         
+        // Filter bookings based on user role
         if (user.role === 'student') {
-          setUserRequests(mappedBookings);
+          const userBookings = mappedBookings.filter(booking => 
+            booking.spoc.email === user.email
+          );
+          setUserRequests(userBookings);
+          setAllRequests([]);
         } else {
+          // For reception and admin, show all bookings but track user's own bookings separately
           setUserRequests(mappedBookings.filter(booking => 
             booking.spoc.email === user.email
           ));
@@ -121,7 +100,7 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [user]);
 
   // Create a new booking request
-  const createBookingRequest = async (bookingData: Omit<Booking, 'id' | 'status' | 'createdAt' | 'updatedAt'>): Promise<string> => {
+  const createBookingRequest = async (bookingData: Omit<BookingRequest, 'id' | 'status' | 'createdAt' | 'updatedAt'>): Promise<string> => {
     if (!user) throw new Error('User must be logged in to create a booking');
     
     try {
@@ -152,7 +131,7 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         throw error;
       }
       
-      if (data && data[0]) {
+      if (data && data.length > 0) {
         toast({
           title: 'Booking created',
           description: 'Your booking request has been submitted successfully',
@@ -180,7 +159,7 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     try {
       setIsLoading(true);
       
-      const updateData: Record<string, any> = { status };
+      const updateData: any = { status };
       
       // Based on role, update different fields
       if (user.role === 'reception') {
@@ -284,3 +263,5 @@ export const useBooking = () => {
   }
   return context;
 };
+
+export { BookingRequest };
