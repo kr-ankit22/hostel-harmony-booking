@@ -1,245 +1,275 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './AuthContext';
+import { useToast } from '@/hooks/use-toast';
 
-// Types
-export interface RequestContact {
-  name: string;
-  email: string;
-}
-
-export interface BookingRequest {
+interface Booking {
   id: string;
-  userId: string;
-  userName: string;
+  requestType: string;
   department: string;
+  numberOfRooms: number;
   startDate: Date;
   endDate: Date;
-  numberOfRooms: number;
-  spoc: RequestContact;
-  requestType: 'single' | 'shared' | 'family' | 'guest';
   reason: string;
-  status: 'pending' | 'reception-approved' | 'approved' | 'rejected' | 'reconsidered';
+  status: string;
+  spoc: {
+    name: string;
+    email: string;
+  };
   receptionNote?: string;
   adminNote?: string;
-  priority: 'low' | 'medium' | 'high';
+  priority?: number;
+  documents?: string;
   createdAt: Date;
-  documents?: string[];
-  profileImage?: string;
-}
-
-interface BookingStats {
-  totalRooms: number;
-  availableRooms: number;
-  pendingRequests: number;
-  approvedRequests: number;
+  updatedAt: Date;
 }
 
 interface BookingContextType {
-  bookingRequests: BookingRequest[];
-  userRequests: BookingRequest[];
-  bookingStats: BookingStats;
-  addRequest: (request: Omit<BookingRequest, 'id' | 'userId' | 'userName' | 'status' | 'createdAt'>) => Promise<void>;
-  updateRequestStatus: (
-    requestId: string, 
-    status: BookingRequest['status'], 
-    note?: string,
-    priority?: BookingRequest['priority']
-  ) => Promise<void>;
-  uploadDocuments: (requestId: string, documents: string[], profileImage?: string) => Promise<void>;
-  getRequestById: (requestId: string) => BookingRequest | undefined;
+  userRequests: Booking[];
+  allRequests: Booking[];
+  isLoading: boolean;
+  createBookingRequest: (bookingData: Omit<Booking, 'id' | 'status' | 'createdAt' | 'updatedAt'>) => Promise<string>;
+  updateBookingStatus: (id: string, status: string, note?: string, priority?: number) => Promise<void>;
+  uploadDocuments: (id: string, documentsUrl: string) => Promise<void>;
+  refreshBookings: () => Promise<void>;
 }
 
-// Initialize context
 const BookingContext = createContext<BookingContextType | undefined>(undefined);
 
-// Initial mock data
-const initialRequests: BookingRequest[] = [
-  {
-    id: '1',
-    userId: '1',
-    userName: 'Student User',
-    department: 'Computer Science',
-    startDate: new Date(2023, 8, 1),
-    endDate: new Date(2023, 11, 15),
-    numberOfRooms: 1,
-    spoc: {
-      name: 'Dr. Sharma',
-      email: 'sharma@bits.ac.in'
-    },
-    requestType: 'single',
-    reason: 'Exchange program accommodation',
-    status: 'pending',
-    priority: 'medium',
-    createdAt: new Date(2023, 7, 15),
-  },
-  {
-    id: '2',
-    userId: '1',
-    userName: 'Student User',
-    department: 'Computer Science',
-    startDate: new Date(2023, 5, 10),
-    endDate: new Date(2023, 6, 20),
-    numberOfRooms: 2,
-    spoc: {
-      name: 'Dr. Patel',
-      email: 'patel@bits.ac.in'
-    },
-    requestType: 'shared',
-    reason: 'Summer internship accommodation',
-    status: 'reception-approved',
-    receptionNote: 'Rooms available for this period',
-    priority: 'high',
-    createdAt: new Date(2023, 4, 25),
-  },
-];
-
 export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [userRequests, setUserRequests] = useState<Booking[]>([]);
+  const [allRequests, setAllRequests] = useState<Booking[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const { user } = useAuth();
-  const [bookingRequests, setBookingRequests] = useState<BookingRequest[]>(initialRequests);
-  const [bookingStats, setBookingStats] = useState<BookingStats>({
-    totalRooms: 100,
-    availableRooms: 65,
-    pendingRequests: 10,
-    approvedRequests: 35,
+  const { toast } = useToast();
+
+  // Function to convert database booking to frontend format
+  const mapBookingFromDB = (booking: any): Booking => ({
+    id: booking.id,
+    requestType: booking.request_type,
+    department: booking.department,
+    numberOfRooms: booking.number_of_rooms,
+    startDate: new Date(booking.start_date),
+    endDate: new Date(booking.end_date),
+    reason: booking.reason,
+    status: booking.status,
+    spoc: {
+      name: booking.spoc_name,
+      email: booking.spoc_email,
+    },
+    receptionNote: booking.reception_note,
+    adminNote: booking.admin_note,
+    priority: booking.priority,
+    documents: booking.documents,
+    createdAt: new Date(booking.created_at),
+    updatedAt: new Date(booking.updated_at),
   });
 
-  // Filter user's requests
-  const userRequests = user
-    ? bookingRequests.filter(request => request.userId === user.id)
-    : [];
-
-  // Load from localStorage on component mount
-  useEffect(() => {
-    const storedRequests = localStorage.getItem('bookingRequests');
-    const storedStats = localStorage.getItem('bookingStats');
+  // Fetch user-specific booking requests
+  const fetchUserBookings = async () => {
+    if (!user) return;
     
-    if (storedRequests) {
-      // Parse dates correctly
-      const parsedRequests = JSON.parse(storedRequests, (key, value) => {
-        if (key === 'startDate' || key === 'endDate' || key === 'createdAt') {
-          return new Date(value);
+    try {
+      setIsLoading(true);
+      let query = supabase
+        .from('booking_requests')
+        .select('*');
+        
+      // For student role, only fetch their own requests
+      if (user.role === 'student') {
+        query = query.eq('user_id', user.id);
+      }
+      
+      // Order by creation date, newest first
+      query = query.order('created_at', { ascending: false });
+      
+      const { data, error } = await query;
+      
+      if (error) {
+        console.error('Error fetching bookings:', error);
+        return;
+      }
+      
+      if (data) {
+        const mappedBookings = data.map(mapBookingFromDB);
+        
+        if (user.role === 'student') {
+          setUserRequests(mappedBookings);
+        } else {
+          setUserRequests(mappedBookings.filter(booking => 
+            booking.spoc.email === user.email
+          ));
+          setAllRequests(mappedBookings);
         }
-        return value;
+      }
+    } catch (error) {
+      console.error('Error in fetchUserBookings:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Fetch bookings whenever the user changes
+  useEffect(() => {
+    if (user) {
+      fetchUserBookings();
+    } else {
+      setUserRequests([]);
+      setAllRequests([]);
+    }
+  }, [user]);
+
+  // Create a new booking request
+  const createBookingRequest = async (bookingData: Omit<Booking, 'id' | 'status' | 'createdAt' | 'updatedAt'>): Promise<string> => {
+    if (!user) throw new Error('User must be logged in to create a booking');
+    
+    try {
+      setIsLoading(true);
+      
+      const { data, error } = await supabase
+        .from('booking_requests')
+        .insert({
+          user_id: user.id,
+          request_type: bookingData.requestType,
+          department: bookingData.department,
+          number_of_rooms: bookingData.numberOfRooms,
+          start_date: bookingData.startDate.toISOString(),
+          end_date: bookingData.endDate.toISOString(),
+          reason: bookingData.reason,
+          status: 'pending',
+          spoc_name: bookingData.spoc.name,
+          spoc_email: bookingData.spoc.email,
+        })
+        .select();
+        
+      if (error) {
+        toast({
+          title: 'Error creating booking',
+          description: error.message,
+          variant: 'destructive',
+        });
+        throw error;
+      }
+      
+      if (data && data[0]) {
+        toast({
+          title: 'Booking created',
+          description: 'Your booking request has been submitted successfully',
+        });
+        
+        // Refresh the bookings list
+        await fetchUserBookings();
+        
+        return data[0].id;
+      }
+      
+      throw new Error('Failed to create booking');
+    } catch (error) {
+      console.error('Error in createBookingRequest:', error);
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Update booking status
+  const updateBookingStatus = async (id: string, status: string, note?: string, priority?: number): Promise<void> => {
+    if (!user) throw new Error('User must be logged in to update a booking');
+    
+    try {
+      setIsLoading(true);
+      
+      const updateData: Record<string, any> = { status };
+      
+      // Based on role, update different fields
+      if (user.role === 'reception') {
+        if (note) updateData.reception_note = note;
+        if (typeof priority === 'number') updateData.priority = priority;
+      } else if (user.role === 'admin') {
+        if (note) updateData.admin_note = note;
+      }
+      
+      const { error } = await supabase
+        .from('booking_requests')
+        .update(updateData)
+        .eq('id', id);
+        
+      if (error) {
+        toast({
+          title: 'Error updating booking',
+          description: error.message,
+          variant: 'destructive',
+        });
+        throw error;
+      }
+      
+      toast({
+        title: 'Booking updated',
+        description: `Booking status changed to ${status}`,
       });
-      setBookingRequests(parsedRequests);
+      
+      // Refresh the bookings list
+      await fetchUserBookings();
+    } catch (error) {
+      console.error('Error in updateBookingStatus:', error);
+      throw error;
+    } finally {
+      setIsLoading(false);
     }
+  };
+
+  // Upload documents for a booking
+  const uploadDocuments = async (id: string, documentsUrl: string): Promise<void> => {
+    if (!user) throw new Error('User must be logged in to upload documents');
     
-    if (storedStats) {
-      setBookingStats(JSON.parse(storedStats));
+    try {
+      setIsLoading(true);
+      
+      const { error } = await supabase
+        .from('booking_requests')
+        .update({ documents: documentsUrl })
+        .eq('id', id);
+        
+      if (error) {
+        toast({
+          title: 'Error uploading documents',
+          description: error.message,
+          variant: 'destructive',
+        });
+        throw error;
+      }
+      
+      toast({
+        title: 'Documents uploaded',
+        description: 'Your documents have been uploaded successfully',
+      });
+      
+      // Refresh the bookings list
+      await fetchUserBookings();
+    } catch (error) {
+      console.error('Error in uploadDocuments:', error);
+      throw error;
+    } finally {
+      setIsLoading(false);
     }
-  }, []);
-
-  // Save to localStorage when state changes
-  useEffect(() => {
-    localStorage.setItem('bookingRequests', JSON.stringify(bookingRequests));
-    localStorage.setItem('bookingStats', JSON.stringify(bookingStats));
-  }, [bookingRequests, bookingStats]);
-
-  // Add a new booking request
-  const addRequest = async (
-    requestData: Omit<BookingRequest, 'id' | 'userId' | 'userName' | 'status' | 'createdAt'>
-  ) => {
-    if (!user) throw new Error('User must be logged in to create a request');
-
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 800));
-
-    const newRequest: BookingRequest = {
-      id: Date.now().toString(),
-      userId: user.id,
-      userName: user.name,
-      status: 'pending',
-      createdAt: new Date(),
-      ...requestData,
-    };
-
-    setBookingRequests(prev => [...prev, newRequest]);
-    setBookingStats(prev => ({
-      ...prev,
-      pendingRequests: prev.pendingRequests + 1,
-    }));
-
-    return;
   };
 
-  // Update request status
-  const updateRequestStatus = async (
-    requestId: string, 
-    status: BookingRequest['status'], 
-    note?: string,
-    priority?: BookingRequest['priority']
-  ) => {
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 800));
-
-    setBookingRequests(prev => 
-      prev.map(request => {
-        if (request.id === requestId) {
-          const updatedRequest = { ...request, status };
-          
-          // Update note based on role
-          if (user?.role === 'reception') {
-            updatedRequest.receptionNote = note || request.receptionNote;
-          } else if (user?.role === 'admin') {
-            updatedRequest.adminNote = note || request.adminNote;
-          }
-          
-          // Update priority if provided
-          if (priority) {
-            updatedRequest.priority = priority;
-          }
-          
-          return updatedRequest;
-        }
-        return request;
-      })
-    );
-
-    // Update stats based on status change
-    if (status === 'approved') {
-      setBookingStats(prev => ({
-        ...prev,
-        availableRooms: prev.availableRooms - 1,
-        pendingRequests: prev.pendingRequests - 1,
-        approvedRequests: prev.approvedRequests + 1,
-      }));
-    }
-
-    return;
-  };
-
-  // Upload documents
-  const uploadDocuments = async (requestId: string, documents: string[], profileImage?: string) => {
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    setBookingRequests(prev => 
-      prev.map(request => 
-        request.id === requestId
-          ? { ...request, documents, ...(profileImage && { profileImage }) }
-          : request
-      )
-    );
-
-    return;
-  };
-
-  // Get request by ID
-  const getRequestById = (requestId: string) => {
-    return bookingRequests.find(request => request.id === requestId);
+  // Function to refresh bookings data
+  const refreshBookings = async (): Promise<void> => {
+    await fetchUserBookings();
   };
 
   return (
     <BookingContext.Provider
       value={{
-        bookingRequests,
         userRequests,
-        bookingStats,
-        addRequest,
-        updateRequestStatus,
+        allRequests,
+        isLoading,
+        createBookingRequest,
+        updateBookingStatus,
         uploadDocuments,
-        getRequestById,
+        refreshBookings,
       }}
     >
       {children}
