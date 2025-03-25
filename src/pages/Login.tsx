@@ -25,6 +25,7 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs';
+import { supabase } from '@/integrations/supabase/client';
 
 // Login form schema
 const loginFormSchema = z.object({
@@ -49,10 +50,36 @@ const Login = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [activeTab, setActiveTab] = useState<string>('login');
+  const [connectionStatus, setConnectionStatus] = useState<string>('Checking connection...');
+
+  // Check Supabase connection on mount
+  useEffect(() => {
+    const checkConnection = async () => {
+      try {
+        const start = Date.now();
+        // Perform a simple query to test connection
+        const { data, error } = await supabase.from('profiles').select('count(*)').limit(1);
+        const end = Date.now();
+        
+        if (error) {
+          console.error('Supabase connection error:', error);
+          setConnectionStatus(`Connection error: ${error.message}`);
+        } else {
+          setConnectionStatus(`Connected (${end - start}ms)`);
+        }
+      } catch (err) {
+        console.error('Failed to check Supabase connection:', err);
+        setConnectionStatus('Connection check failed');
+      }
+    };
+    
+    checkConnection();
+  }, []);
 
   // Redirect if already logged in
   useEffect(() => {
     if (isAuthenticated && user) {
+      console.log('User is authenticated, redirecting to dashboard:', user);
       // Redirect based on user role
       if (user.role === 'student') navigate('/student');
       else if (user.role === 'reception') navigate('/reception');
@@ -82,24 +109,35 @@ const Login = () => {
 
   const onLoginSubmit = async (data: LoginFormValues) => {
     setIsLoading(true);
+    console.log('Login started for email:', data.email);
     try {
+      console.time('loginDuration');
       await login(data.email, data.password);
+      console.timeEnd('loginDuration');
+      console.log('Login successfully completed');
       // Navigation is handled by the useEffect above
     } catch (error) {
-      console.error('Login error:', error);
+      console.error('Login error details:', error);
       setIsLoading(false);
     }
   };
 
   const onSignupSubmit = async (data: SignupFormValues) => {
     setIsLoading(true);
+    console.log('Signup started for email:', data.email);
     try {
+      console.time('signupDuration');
       await signUp(data.email, data.password, data.name);
+      console.timeEnd('signupDuration');
       setActiveTab('login');
       // Pre-fill login form with signup email
       loginForm.setValue('email', data.email);
+      toast({
+        title: 'Account created',
+        description: 'You can now log in with your new account',
+      });
     } catch (error) {
-      console.error('Signup error:', error);
+      console.error('Signup error details:', error);
     } finally {
       setIsLoading(false);
     }
@@ -128,6 +166,9 @@ const Login = () => {
             <p className="text-academic-text/70 mt-2">
               Access the hostel booking management system
             </p>
+            <div className="mt-2 text-xs text-academic-text/60">
+              {connectionStatus}
+            </div>
           </div>
 
           <Tabs 
