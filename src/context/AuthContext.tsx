@@ -89,14 +89,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.log('Profile data retrieved:', data);
         setUser({
           id: supabaseUser.id,
-          name: data.name,
-          email: data.email,
+          name: data.name || 'Unknown User',
+          email: data.email || supabaseUser.email || '',
           role: data.role as UserRole,
           department: data.department || undefined,
           profileImage: data.profile_image || undefined,
         });
       } else {
         console.log('No profile found for user:', supabaseUser.id);
+        toast({
+          title: 'Profile not found',
+          description: 'Your user profile could not be retrieved.',
+          variant: 'destructive',
+        });
       }
     } catch (error) {
       console.error('Error in fetchUserProfile:', error);

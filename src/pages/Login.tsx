@@ -57,8 +57,8 @@ const Login = () => {
     const checkConnection = async () => {
       try {
         const start = Date.now();
-        // Perform a simple query to test connection
-        const { data, error } = await supabase.from('profiles').select('count(*)').limit(1);
+        // Perform a simple query to test connection - fix the query syntax
+        const { data, error } = await supabase.from('profiles').select('id').limit(1);
         const end = Date.now();
         
         if (error) {
